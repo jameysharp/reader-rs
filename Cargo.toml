@@ -1,0 +1,11 @@
+[package]
+name = "reader"
+version = "0.1.0"
+authors = ["Jamey Sharp <jamey@minilop.net>"]
+
+[dependencies]
+gio = "*"
+glib = "*"
+gtk = { version = "*", features = ["v3_10"] }
+rss = { version = "*", features = ["from_url"] }
+webkit2gtk = "*"
