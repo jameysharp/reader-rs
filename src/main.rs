@@ -1,4 +1,5 @@
 use gio::prelude::*;
+use glib::clone;
 use gtk::prelude::*;
 use rss::extension::ExtensionMap;
 use rss::Channel;
@@ -106,10 +107,7 @@ fn build_ui(application: &gtk::Application) {
     let feed = Arc::new(Mutex::new(Feed::default()));
 
     feedurl.set_placeholder_text(Some("Feed URL"));
-    feedurl.connect_activate({
-        let feed = feed.clone();
-        let label = label.clone();
-        let webview = webview.clone();
+    feedurl.connect_activate(clone!(@strong feed, @strong label, @strong webview =>
         move |feedurl| {
             let url = feedurl.get_text().expect("feed URL");
             // FIXME: fetch and parse the feed asynchronously
@@ -146,38 +144,30 @@ fn build_ui(application: &gtk::Application) {
                     })
                 })
                 .collect();
-            let feed = feed.clone();
-            let label = label.clone();
-            let webview = webview.clone();
-            idle_add(move || {
+
+            idle_add(clone!(@strong feed, @strong label, @strong webview => move || {
                 feed.lock().unwrap().goto_page(&label, &webview, 0);
                 glib::Continue(false)
-            });
+            }));
         }
-    });
+    ));
 
-    backbutton.connect_clicked({
-        let feed = feed.clone();
-        let label = label.clone();
-        let webview = webview.clone();
+    backbutton.connect_clicked(clone!(@strong feed, @strong label, @strong webview =>
         move |_| {
             let mut feed = feed.lock().unwrap();
             if let Some(page) = feed.page.get().checked_sub(1) {
                 feed.goto_page(&label, &webview, page);
             }
         }
-    });
+    ));
 
-    nextbutton.connect_clicked({
-        let feed = feed.clone();
-        let label = label.clone();
-        let webview = webview.clone();
+    nextbutton.connect_clicked(clone!(@strong feed, @strong label, @strong webview =>
         move |_| {
             let mut feed = feed.lock().unwrap();
             let page = feed.page.get() + 1;
             feed.goto_page(&label, &webview, page);
         }
-    });
+    ));
 
     feed.lock().unwrap().goto_page(&label, &webview, 0);
 
