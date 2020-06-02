@@ -1,9 +1,3 @@
-extern crate gio;
-extern crate glib;
-extern crate gtk;
-extern crate rss;
-extern crate webkit2gtk;
-
 use gio::prelude::*;
 use gtk::prelude::*;
 use rss::Channel;
