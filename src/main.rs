@@ -1,7 +1,7 @@
 use gio::prelude::*;
 use gtk::prelude::*;
-use rss::Channel;
 use rss::extension::ExtensionMap;
+use rss::Channel;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::env::args;
@@ -37,9 +37,13 @@ struct AtomLink {
     length: Option<usize>,
 }
 
-fn get_atom_links(namespaces: &HashMap<String, String>, extensions: &ExtensionMap) -> HashMap<String, Vec<AtomLink>> {
+fn get_atom_links(
+    namespaces: &HashMap<String, String>,
+    extensions: &ExtensionMap,
+) -> HashMap<String, Vec<AtomLink>> {
     let mut result = HashMap::new();
-    let links = namespaces.iter()
+    let links = namespaces
+        .iter()
         .filter(|&(_, ns)| *ns == "http://www.w3.org/2005/Atom")
         .filter_map(|(qual, _)| extensions.get(qual))
         .filter_map(|ext| ext.get("link"))
@@ -47,8 +51,12 @@ fn get_atom_links(namespaces: &HashMap<String, String>, extensions: &ExtensionMa
         .map(|link| link.attrs());
     for attrs in links {
         if let Some(href) = attrs.get("href") {
-            let rel = attrs.get("rel").cloned().unwrap_or_else(|| "alternate".into());
-            result.entry(rel)
+            let rel = attrs
+                .get("rel")
+                .cloned()
+                .unwrap_or_else(|| "alternate".into());
+            result
+                .entry(rel)
                 .or_insert_with(|| Vec::new())
                 .push(AtomLink {
                     href: href.clone(),
@@ -84,13 +92,15 @@ fn build_ui(application: &gtk::Application) {
     let feedurl = gtk::Entry::new();
     controls.pack_start(&feedurl, true, true, 0);
 
-    let backbutton = gtk::Button::new_from_icon_name(Some("go-previous"), gtk::IconSize::SmallToolbar.into());
+    let backbutton =
+        gtk::Button::new_from_icon_name(Some("go-previous"), gtk::IconSize::SmallToolbar.into());
     controls.pack_start(&backbutton, false, false, 0);
 
     let label = gtk::Label::new(None);
     controls.pack_start(&label, true, true, 0);
 
-    let nextbutton = gtk::Button::new_from_icon_name(Some("go-next"), gtk::IconSize::SmallToolbar.into());
+    let nextbutton =
+        gtk::Button::new_from_icon_name(Some("go-next"), gtk::IconSize::SmallToolbar.into());
     controls.pack_start(&nextbutton, false, false, 0);
 
     let feed = Arc::new(Mutex::new(Feed::default()));
@@ -126,12 +136,15 @@ fn build_ui(application: &gtk::Application) {
                 }
             }
             }*/
-            feed.lock().unwrap().pages = channel.into_items()
+            feed.lock().unwrap().pages = channel
+                .into_items()
                 .into_iter()
-                .filter_map(|item| item.link().map(|link| Entry {
-                    uri: link.into(),
-                    title: item.title().unwrap_or("").into(),
-                }))
+                .filter_map(|item| {
+                    item.link().map(|link| Entry {
+                        uri: link.into(),
+                        title: item.title().unwrap_or("").into(),
+                    })
+                })
                 .collect();
             let feed = feed.clone();
             let label = label.clone();
@@ -172,9 +185,9 @@ fn build_ui(application: &gtk::Application) {
 }
 
 fn main() {
-    let application = gtk::Application::new(Some("net.minilop.reader"),
-                                            gio::ApplicationFlags::empty())
-        .expect("Initialization failed...");
+    let application =
+        gtk::Application::new(Some("net.minilop.reader"), gio::ApplicationFlags::empty())
+            .expect("Initialization failed...");
 
     application.connect_activate(build_ui);
     application.run(&args().collect::<Vec<_>>());
