@@ -6,6 +6,6 @@ authors = ["Jamey Sharp <jamey@minilop.net>"]
 [dependencies]
 gio = "*"
 glib = "*"
-gtk = { version = "*", features = ["v3_10"] }
+gtk = "*"
 rss = { version = "*", features = ["from_url"] }
 webkit2gtk = "*"

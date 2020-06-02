@@ -90,13 +90,13 @@ fn build_ui(application: &gtk::Application) {
     let feedurl = gtk::Entry::new();
     controls.pack_start(&feedurl, true, true, 0);
 
-    let backbutton = gtk::Button::new_from_icon_name("go-previous", gtk::IconSize::SmallToolbar.into());
+    let backbutton = gtk::Button::new_from_icon_name(Some("go-previous"), gtk::IconSize::SmallToolbar.into());
     controls.pack_start(&backbutton, false, false, 0);
 
-    let label = gtk::Label::new("");
+    let label = gtk::Label::new(None);
     controls.pack_start(&label, true, true, 0);
 
-    let nextbutton = gtk::Button::new_from_icon_name("go-next", gtk::IconSize::SmallToolbar.into());
+    let nextbutton = gtk::Button::new_from_icon_name(Some("go-next"), gtk::IconSize::SmallToolbar.into());
     controls.pack_start(&nextbutton, false, false, 0);
 
     let feed = Arc::new(Mutex::new(Feed::default()));
@@ -178,7 +178,7 @@ fn build_ui(application: &gtk::Application) {
 }
 
 fn main() {
-    let application = gtk::Application::new("net.minilop.reader",
+    let application = gtk::Application::new(Some("net.minilop.reader"),
                                             gio::ApplicationFlags::empty())
         .expect("Initialization failed...");
 
