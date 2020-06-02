@@ -1,33 +1,30 @@
 use gio::prelude::*;
-use glib::clone;
+use glib::GString;
 use gtk::prelude::*;
+use relm::{connect, init, Relm, Update, Widget};
+use relm_derive::Msg;
 use rss::extension::ExtensionMap;
 use rss::Channel;
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::env::args;
-use std::sync::{Arc, Mutex};
 use webkit2gtk::{WebContext, WebView, WebViewExt};
+
+#[derive(Msg, Debug)]
+pub enum Action {
+    LoadFeed(GString),
+    NextPage,
+    PreviousPage,
+}
 
 struct Entry {
     uri: String,
     title: String,
 }
 
-#[derive(Default)]
 struct Feed {
     pages: Vec<Entry>,
-    page: Cell<usize>,
-}
-
-impl Feed {
-    fn goto_page(&mut self, label: &gtk::Label, webview: &WebView, page: usize) {
-        if let Some(entry) = self.pages.get(page) {
-            self.page.set(page);
-            webview.load_uri(&entry.uri);
-            label.set_text(&entry.title);
-        }
-    }
+    page: usize,
+    application: gtk::Application,
 }
 
 struct AtomLink {
@@ -71,107 +68,143 @@ fn get_atom_links(
     result
 }
 
-fn build_ui(application: &gtk::Application) {
-    let window = gtk::ApplicationWindow::new(application);
+struct Widgets {
+    window: gtk::ApplicationWindow,
+    webview: WebView,
+    label: gtk::Label,
+}
 
-    window.set_title("Full-history RSS Reader");
-    window.set_position(gtk::WindowPosition::Center);
-    window.set_default_size(800, 600);
+struct Win {
+    feed: Feed,
+    widgets: Widgets,
+}
 
-    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    window.add(&vbox);
+impl Update for Win {
+    type Model = Feed;
+    type ModelParam = gtk::Application;
+    type Msg = Action;
 
-    let context = WebContext::get_default().unwrap();
+    fn model(_relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {
+        Feed {
+            pages: Vec::new(),
+            page: 0,
+            application: param,
+        }
+    }
 
-    let webview = WebView::new_with_context(&context);
-    vbox.pack_end(&webview, true, true, 0);
-
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    controls.set_border_width(5);
-    vbox.pack_start(&controls, false, false, 0);
-
-    let feedurl = gtk::Entry::new();
-    controls.pack_start(&feedurl, true, true, 0);
-
-    let backbutton =
-        gtk::Button::new_from_icon_name(Some("go-previous"), gtk::IconSize::SmallToolbar.into());
-    controls.pack_start(&backbutton, false, false, 0);
-
-    let label = gtk::Label::new(None);
-    controls.pack_start(&label, true, true, 0);
-
-    let nextbutton =
-        gtk::Button::new_from_icon_name(Some("go-next"), gtk::IconSize::SmallToolbar.into());
-    controls.pack_start(&nextbutton, false, false, 0);
-
-    let feed = Arc::new(Mutex::new(Feed::default()));
-
-    feedurl.set_placeholder_text(Some("Feed URL"));
-    feedurl.connect_activate(clone!(@strong feed, @strong label, @strong webview =>
-        move |feedurl| {
-            let url = feedurl.get_text().expect("feed URL");
-            // FIXME: fetch and parse the feed asynchronously
-            let channel = Channel::from_url(&url).unwrap();
-            let links = get_atom_links(channel.namespaces(), channel.extensions());
-            if let Some(archives) = links.get("prev-archive") {
-                if archives.len() == 1 {
-                    println!("{}", archives[0].href);
+    fn update(&mut self, event: Action) {
+        match event {
+            Action::LoadFeed(url) => {
+                self.feed.load(url);
+                self.feed.goto_page(&self.widgets, 0);
+            }
+            Action::NextPage => {
+                let page = self.feed.page + 1;
+                self.feed.goto_page(&self.widgets, page);
+            }
+            Action::PreviousPage => {
+                if let Some(page) = self.feed.page.checked_sub(1) {
+                    self.feed.goto_page(&self.widgets, page);
                 }
             }
-            /*{
-            let links = channel.namespaces()
-                .iter()
-                .filter(|&(_, ns)| *ns == "http://www.w3.org/2005/Atom")
-                .filter_map(|(qual, _)| channel.extensions().get(qual))
-                .filter_map(|ext| ext.get("link"))
-                .flat_map(|links| links)
-                .map(|link| link.attrs());
-            for attrs in links {
-                if let (Some(rel), Some(href)) = (attrs.get("rel"), attrs.get("href")) {
-                    if *rel == "prev-archive" {
-                        println!("{}", href);
-                    }
-                }
+        }
+    }
+}
+
+impl Widget for Win {
+    type Root = gtk::ApplicationWindow;
+
+    fn root(&self) -> Self::Root {
+        self.widgets.window.clone()
+    }
+
+    fn view(relm: &Relm<Self>, feed: Self::Model) -> Self {
+        let window = gtk::ApplicationWindow::new(&feed.application);
+
+        window.set_title("Full-history RSS Reader");
+        window.set_position(gtk::WindowPosition::Center);
+        window.set_default_size(800, 600);
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        window.add(&vbox);
+
+        let context = WebContext::get_default().unwrap();
+
+        let webview = WebView::new_with_context(&context);
+        vbox.pack_end(&webview, true, true, 0);
+
+        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        controls.set_border_width(5);
+        vbox.pack_start(&controls, false, false, 0);
+
+        let feedurl = gtk::Entry::new();
+        feedurl.set_placeholder_text(Some("Feed URL"));
+        controls.pack_start(&feedurl, true, true, 0);
+
+        let backbutton = gtk::Button::new_from_icon_name(
+            Some("go-previous"),
+            gtk::IconSize::SmallToolbar.into(),
+        );
+        controls.pack_start(&backbutton, false, false, 0);
+
+        let label = gtk::Label::new(None);
+        controls.pack_start(&label, true, true, 0);
+
+        let nextbutton =
+            gtk::Button::new_from_icon_name(Some("go-next"), gtk::IconSize::SmallToolbar.into());
+        controls.pack_start(&nextbutton, false, false, 0);
+
+        window.show_all();
+
+        connect!(
+            relm,
+            feedurl,
+            connect_activate(feedurl),
+            Action::LoadFeed(feedurl.get_text().expect("feed URL"))
+        );
+        connect!(relm, backbutton, connect_clicked(_), Action::PreviousPage);
+        connect!(relm, nextbutton, connect_clicked(_), Action::NextPage);
+
+        Win {
+            feed,
+            widgets: Widgets {
+                window,
+                webview,
+                label,
+            },
+        }
+    }
+}
+
+impl Feed {
+    fn goto_page(&mut self, widgets: &Widgets, page: usize) {
+        if let Some(entry) = self.pages.get(page) {
+            self.page = page;
+            widgets.webview.load_uri(&entry.uri);
+            widgets.label.set_text(&entry.title);
+        }
+    }
+
+    fn load(&mut self, url: GString) {
+        // FIXME: fetch and parse the feed asynchronously
+        let channel = Channel::from_url(&url).unwrap();
+        let links = get_atom_links(channel.namespaces(), channel.extensions());
+        if let Some(archives) = links.get("prev-archive") {
+            if archives.len() == 1 {
+                println!("{}", archives[0].href);
             }
-            }*/
-            feed.lock().unwrap().pages = channel
-                .into_items()
-                .into_iter()
-                .filter_map(|item| {
-                    item.link().map(|link| Entry {
-                        uri: link.into(),
-                        title: item.title().unwrap_or("").into(),
-                    })
+        }
+        self.pages = channel
+            .into_items()
+            .into_iter()
+            .filter_map(|item| {
+                item.link().map(|link| Entry {
+                    uri: link.into(),
+                    title: item.title().unwrap_or("").into(),
                 })
-                .collect();
-
-            idle_add(clone!(@strong feed, @strong label, @strong webview => move || {
-                feed.lock().unwrap().goto_page(&label, &webview, 0);
-                glib::Continue(false)
-            }));
-        }
-    ));
-
-    backbutton.connect_clicked(clone!(@strong feed, @strong label, @strong webview =>
-        move |_| {
-            let mut feed = feed.lock().unwrap();
-            if let Some(page) = feed.page.get().checked_sub(1) {
-                feed.goto_page(&label, &webview, page);
-            }
-        }
-    ));
-
-    nextbutton.connect_clicked(clone!(@strong feed, @strong label, @strong webview =>
-        move |_| {
-            let mut feed = feed.lock().unwrap();
-            let page = feed.page.get() + 1;
-            feed.goto_page(&label, &webview, page);
-        }
-    ));
-
-    feed.lock().unwrap().goto_page(&label, &webview, 0);
-
-    window.show_all();
+            })
+            .collect();
+    }
 }
 
 fn main() {
@@ -179,6 +212,8 @@ fn main() {
         gtk::Application::new(Some("net.minilop.reader"), gio::ApplicationFlags::empty())
             .expect("Initialization failed...");
 
-    application.connect_activate(build_ui);
+    application.connect_activate(|application| {
+        std::mem::forget(init::<Win>(application.clone()).expect("window init"));
+    });
     application.run(&args().collect::<Vec<_>>());
 }
