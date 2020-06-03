@@ -1,71 +1,23 @@
+use feed_rs::model::Feed;
 use gio::prelude::*;
 use glib::MainContext;
 use gtk::prelude::*;
 use relm::{connect, init, Relm, Update, Widget};
 use relm_derive::Msg;
-use rss::extension::ExtensionMap;
-use rss::Channel;
-use std::collections::HashMap;
 use std::env::args;
 use webkit2gtk::{WebView, WebViewExt};
 
 #[derive(Msg)]
 enum Action {
-    SetPages(Vec<Entry>),
+    SetFeed(Feed),
     NextPage,
     PreviousPage,
 }
 
-struct Entry {
-    uri: String,
-    title: String,
-}
-
-struct Feed {
-    pages: Vec<Entry>,
+struct Model {
+    feed: Feed,
     page: usize,
     application: gtk::Application,
-}
-
-struct AtomLink {
-    href: String,
-    mediatype: Option<String>,
-    hreflang: Option<String>,
-    title: Option<String>,
-    length: Option<usize>,
-}
-
-fn get_atom_links(
-    namespaces: &HashMap<String, String>,
-    extensions: &ExtensionMap,
-) -> HashMap<String, Vec<AtomLink>> {
-    let mut result = HashMap::new();
-    let links = namespaces
-        .iter()
-        .filter(|&(_, ns)| *ns == "http://www.w3.org/2005/Atom")
-        .filter_map(|(qual, _)| extensions.get(qual))
-        .filter_map(|ext| ext.get("link"))
-        .flat_map(|links| links)
-        .map(|link| link.attrs());
-    for attrs in links {
-        if let Some(href) = attrs.get("href") {
-            let rel = attrs
-                .get("rel")
-                .cloned()
-                .unwrap_or_else(|| "alternate".into());
-            result
-                .entry(rel)
-                .or_insert_with(|| Vec::new())
-                .push(AtomLink {
-                    href: href.clone(),
-                    mediatype: attrs.get("type").cloned(),
-                    hreflang: attrs.get("hreflang").cloned(),
-                    title: attrs.get("title").cloned(),
-                    length: attrs.get("length").and_then(|v| v.parse().ok()),
-                });
-        }
-    }
-    result
 }
 
 struct Widgets {
@@ -75,18 +27,18 @@ struct Widgets {
 }
 
 struct Win {
-    feed: Feed,
+    model: Model,
     widgets: Widgets,
 }
 
 impl Update for Win {
-    type Model = Feed;
+    type Model = Model;
     type ModelParam = gtk::Application;
     type Msg = Action;
 
     fn model(_relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {
-        Feed {
-            pages: Vec::new(),
+        Model {
+            feed: Feed::default(),
             page: 0,
             application: param,
         }
@@ -94,17 +46,17 @@ impl Update for Win {
 
     fn update(&mut self, event: Action) {
         match event {
-            Action::SetPages(pages) => {
-                self.feed.pages = pages;
-                self.feed.goto_page(&self.widgets, 0);
+            Action::SetFeed(feed) => {
+                self.model.feed = feed;
+                self.model.goto_page(&self.widgets, 0);
             }
             Action::NextPage => {
-                let page = self.feed.page + 1;
-                self.feed.goto_page(&self.widgets, page);
+                let page = self.model.page + 1;
+                self.model.goto_page(&self.widgets, page);
             }
             Action::PreviousPage => {
-                if let Some(page) = self.feed.page.checked_sub(1) {
-                    self.feed.goto_page(&self.widgets, page);
+                if let Some(page) = self.model.page.checked_sub(1) {
+                    self.model.goto_page(&self.widgets, page);
                 }
             }
         }
@@ -118,8 +70,8 @@ impl Widget for Win {
         self.widgets.window.clone()
     }
 
-    fn view(relm: &Relm<Self>, feed: Self::Model) -> Self {
-        let window = gtk::ApplicationWindow::new(&feed.application);
+    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
+        let window = gtk::ApplicationWindow::new(&model.application);
 
         window.set_title("Full-history RSS Reader");
         window.set_position(gtk::WindowPosition::Center);
@@ -163,8 +115,14 @@ impl Widget for Win {
                     // TODO: handle errors
                     let url = feedurl.get_text().expect("feed URL");
                     let body = surf::get(&url).recv_bytes().await.expect(&url);
-                    let pages = load_feed(&body);
-                    stream.emit(Action::SetPages(pages));
+                    let mut reader = &body[..];
+                    let feed = feed_rs::parser::parse(&mut reader).unwrap();
+                    for link in feed.links.iter() {
+                        if link.rel.as_ref().map_or(false, |rel| rel == "prev-archive") {
+                            println!("{:?}", link);
+                        }
+                    }
+                    stream.emit(Action::SetFeed(feed));
                 })
             }
         });
@@ -173,7 +131,7 @@ impl Widget for Win {
         connect!(relm, nextbutton, connect_clicked(_), Action::NextPage);
 
         Win {
-            feed,
+            model,
             widgets: Widgets {
                 window,
                 webview,
@@ -183,34 +141,19 @@ impl Widget for Win {
     }
 }
 
-impl Feed {
+impl Model {
     fn goto_page(&mut self, widgets: &Widgets, page: usize) {
-        if let Some(entry) = self.pages.get(page) {
+        if let Some(entry) = self.feed.entries.get(page) {
             self.page = page;
-            widgets.webview.load_uri(&entry.uri);
-            widgets.label.set_text(&entry.title);
+            let title = entry.title.as_ref().map_or("", |title| &title.content);
+            widgets.label.set_text(title);
+            if let Some(body) = entry.content.as_ref().and_then(|c| c.body.as_ref()) {
+                widgets.webview.load_html(body, None);
+            } else if let Some(link) = entry.links.first() {
+                widgets.webview.load_uri(&link.href);
+            }
         }
     }
-}
-
-fn load_feed(mut body: &[u8]) -> Vec<Entry> {
-    let channel = Channel::read_from(&mut body).unwrap();
-    let links = get_atom_links(channel.namespaces(), channel.extensions());
-    if let Some(archives) = links.get("prev-archive") {
-        if archives.len() == 1 {
-            println!("{}", archives[0].href);
-        }
-    }
-    channel
-        .into_items()
-        .into_iter()
-        .filter_map(|item| {
-            item.link().map(|link| Entry {
-                uri: link.into(),
-                title: item.title().unwrap_or("").into(),
-            })
-        })
-        .collect()
 }
 
 fn main() {
