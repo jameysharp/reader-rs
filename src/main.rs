@@ -130,6 +130,59 @@ impl Widget for Win {
         connect!(relm, backbutton, connect_clicked(_), Action::PreviousPage);
         connect!(relm, nextbutton, connect_clicked(_), Action::NextPage);
 
+        // remove right-click context menu items that don't fit in this app's interaction model
+        webview.connect_context_menu(|_webview, menu, _event, _hit| {
+            use webkit2gtk::ContextMenuAction::*;
+            use webkit2gtk::ContextMenuExt;
+            use webkit2gtk::ContextMenuItemExt;
+
+            let items = menu.get_items();
+            menu.remove_all();
+            for item in items {
+                match item.get_stock_action() {
+                    OpenLink => (),
+                    OpenLinkInNewWindow => (),
+                    DownloadLinkToDisk => (),
+                    OpenImageInNewWindow => (),
+                    DownloadImageToDisk => (),
+                    OpenFrameInNewWindow => (),
+                    GoBack => (),
+                    GoForward => (),
+                    InspectElement => (),
+                    OpenVideoInNewWindow => (),
+                    OpenAudioInNewWindow => (),
+                    DownloadVideoToDisk => (),
+                    DownloadAudioToDisk => (),
+                    _ => menu.append(&item),
+                }
+            }
+
+            false
+        });
+
+        webview.connect_decide_policy(|_webview, decision, _type| {
+            if let Some(nav) = decision.downcast_ref::<webkit2gtk::NavigationPolicyDecision>() {
+                use webkit2gtk::NavigationPolicyDecisionExt;
+                use webkit2gtk::NavigationType::*;
+                use webkit2gtk::PolicyDecisionExt;
+                use webkit2gtk::URIRequestExt;
+
+                match nav.get_navigation_type() {
+                    LinkClicked | BackForward => {
+                        if let Some(uri) = nav.get_request().and_then(|r| r.get_uri()) {
+                            // if opening the link fails, there's nothing useful we can do
+                            let _ = gtk::show_uri(None, &uri, 0);
+                            decision.ignore();
+                        }
+                    }
+                    _ => (),
+                }
+            }
+
+            // don't block handling this event, we've done everything we needed to
+            false
+        });
+
         Win {
             model,
             widgets: Widgets {
