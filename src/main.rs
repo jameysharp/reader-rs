@@ -1,5 +1,5 @@
 use gio::prelude::*;
-use glib::GString;
+use glib::MainContext;
 use gtk::prelude::*;
 use relm::{connect, init, Relm, Update, Widget};
 use relm_derive::Msg;
@@ -157,8 +157,15 @@ impl Widget for Win {
         feedurl.connect_activate({
             let stream = relm.stream().clone();
             move |feedurl| {
-                let pages = load_feed(feedurl.get_text().expect("feed URL"));
-                stream.emit(Action::SetPages(pages));
+                let feedurl = feedurl.clone();
+                let stream = stream.clone();
+                MainContext::ref_thread_default().spawn_local(async move {
+                    // TODO: handle errors
+                    let url = feedurl.get_text().expect("feed URL");
+                    let body = surf::get(&url).recv_bytes().await.expect(&url);
+                    let pages = load_feed(&body);
+                    stream.emit(Action::SetPages(pages));
+                })
             }
         });
 
@@ -186,9 +193,8 @@ impl Feed {
     }
 }
 
-fn load_feed(url: GString) -> Vec<Entry> {
-    // FIXME: fetch and parse the feed asynchronously
-    let channel = Channel::from_url(&url).unwrap();
+fn load_feed(mut body: &[u8]) -> Vec<Entry> {
+    let channel = Channel::read_from(&mut body).unwrap();
     let links = get_atom_links(channel.namespaces(), channel.extensions());
     if let Some(archives) = links.get("prev-archive") {
         if archives.len() == 1 {
