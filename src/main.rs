@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::env::args;
 use webkit2gtk::{WebView, WebViewExt};
 
-#[derive(Msg, Debug)]
-pub enum Action {
-    LoadFeed(GString),
+#[derive(Msg)]
+enum Action {
+    SetPages(Vec<Entry>),
     NextPage,
     PreviousPage,
 }
@@ -94,8 +94,8 @@ impl Update for Win {
 
     fn update(&mut self, event: Action) {
         match event {
-            Action::LoadFeed(url) => {
-                self.feed.load(url);
+            Action::SetPages(pages) => {
+                self.feed.pages = pages;
                 self.feed.goto_page(&self.widgets, 0);
             }
             Action::NextPage => {
@@ -154,12 +154,14 @@ impl Widget for Win {
 
         window.show_all();
 
-        connect!(
-            relm,
-            feedurl,
-            connect_activate(feedurl),
-            Action::LoadFeed(feedurl.get_text().expect("feed URL"))
-        );
+        feedurl.connect_activate({
+            let stream = relm.stream().clone();
+            move |feedurl| {
+                let pages = load_feed(feedurl.get_text().expect("feed URL"));
+                stream.emit(Action::SetPages(pages));
+            }
+        });
+
         connect!(relm, backbutton, connect_clicked(_), Action::PreviousPage);
         connect!(relm, nextbutton, connect_clicked(_), Action::NextPage);
 
@@ -182,27 +184,27 @@ impl Feed {
             widgets.label.set_text(&entry.title);
         }
     }
+}
 
-    fn load(&mut self, url: GString) {
-        // FIXME: fetch and parse the feed asynchronously
-        let channel = Channel::from_url(&url).unwrap();
-        let links = get_atom_links(channel.namespaces(), channel.extensions());
-        if let Some(archives) = links.get("prev-archive") {
-            if archives.len() == 1 {
-                println!("{}", archives[0].href);
-            }
+fn load_feed(url: GString) -> Vec<Entry> {
+    // FIXME: fetch and parse the feed asynchronously
+    let channel = Channel::from_url(&url).unwrap();
+    let links = get_atom_links(channel.namespaces(), channel.extensions());
+    if let Some(archives) = links.get("prev-archive") {
+        if archives.len() == 1 {
+            println!("{}", archives[0].href);
         }
-        self.pages = channel
-            .into_items()
-            .into_iter()
-            .filter_map(|item| {
-                item.link().map(|link| Entry {
-                    uri: link.into(),
-                    title: item.title().unwrap_or("").into(),
-                })
-            })
-            .collect();
     }
+    channel
+        .into_items()
+        .into_iter()
+        .filter_map(|item| {
+            item.link().map(|link| Entry {
+                uri: link.into(),
+                title: item.title().unwrap_or("").into(),
+            })
+        })
+        .collect()
 }
 
 fn main() {
