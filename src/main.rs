@@ -7,7 +7,7 @@ use rss::extension::ExtensionMap;
 use rss::Channel;
 use std::collections::HashMap;
 use std::env::args;
-use webkit2gtk::{WebContext, WebView, WebViewExt};
+use webkit2gtk::{WebView, WebViewExt};
 
 #[derive(Msg, Debug)]
 pub enum Action {
@@ -128,9 +128,7 @@ impl Widget for Win {
         let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
         window.add(&vbox);
 
-        let context = WebContext::get_default().unwrap();
-
-        let webview = WebView::new_with_context(&context);
+        let webview = WebView::new();
         vbox.pack_end(&webview, true, true, 0);
 
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 5);
